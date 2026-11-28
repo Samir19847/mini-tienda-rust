@@ -1,6 +1,4 @@
 mod Tienda{
-    use std::string;
-
 use crate::pausa;
 
     #[derive(Debug)]
@@ -111,18 +109,47 @@ use crate::pausa;
             Ok(ca+cb)
         }
     }
+    pub trait Describible{
+        fn describir(&self)->String;
+    }
+
+    impl Describible for ErrorTienda{
+        fn describir(&self)->String {
+            match self{
+                ErrorTienda::NombreVacio=>String::from("Error: El nombre no puede ir vacío."),
+                ErrorTienda::StockNegativo(s)=>format!("Error: El stock no puede ser negativo.\nStock ingresado: {}\n", s),
+                ErrorTienda::CantidadInvalida(c)=>format!("Error: La cantidad {} no es válida: debe ser mayor a 0.", c),
+                ErrorTienda::StockInsuficiente(pedido,disponible)=> format!("Pediste {pedido} pero solo hay {disponible}."),
+                ErrorTienda::NoExiste=>String::from("Error: Ese producto no existe."),
+            }
+        }
+    }
+    impl Describible for Producto{
+        fn describir(&self)->String {
+            format!("Nombre: {} - Stock: {} unidades.", self.nombre, self.stock)
+        }
+    }
 }
 
-use std::collections::VecDeque;
-use Tienda::{Inventario, Producto};
+use std::{collections::VecDeque, fmt::format};
+use Tienda::{Inventario, Producto, Describible};
 use std::io::{self,Write};
 
-use crate::Tienda::ErrorTienda::{self, CantidadInvalida, NombreVacio};
+use crate::{Comando::Vender, Tienda::ErrorTienda::{self, CantidadInvalida, NombreVacio, StockInsuficiente}};
 #[derive(Debug)]
 enum Comando {
     Vender(String,i32),
     Descontinuar(String),
     Deshacer,
+}
+impl Describible for Comando{
+    fn describir(&self)->String {
+        match self{
+            Comando::Vender(producto,stock )=>format!("Vender: {} unidades de {}", stock, producto),
+            Comando::Descontinuar(producto)=>format!("Descontinuar: {}", producto),
+            Comando::Deshacer=>format!("Deshacer último cambio"),
+        }
+    }
 }
 fn entrada_nombres()->String{
     print!("Por favor, ingrese el nombre del producto:");
@@ -151,6 +178,9 @@ fn pausa(){
     io::stdin().read_line(&mut entrada);
     entrada.clear();
 }
+fn mostrar(d: &dyn Describible){
+    println!("-> {}", d.describir());
+}
 fn main() {
     let mut inventario_lista:Vec<Producto>=Vec::new();
     let mut Inventario=Inventario::new(inventario_lista);
@@ -168,15 +198,18 @@ fn main() {
         println!("| 2. Vender productos.           |");
         println!("| 3. Descontinuar productos.     |");
         println!("| 4. Deshacer cambios.           |");
-        println!("| 5. Ver lista de pedidos.       |");
-        println!("| 6. Ver inventario actual.      |");
-        println!("| 7. Salir.                      |");
+        println!("| 5. Procesar pedidos.           |");
+        println!("| 6. Ver pedidos pendientes.     |");
+        println!("| 7. Ver inventario actual.      |");
+        println!("| 8. Salir.                      |");
         println!("+================================+");
         println!();
         let mut opcion=entrada_numeros(String::from("una opción del menú"));
         match opcion{
             1=>{
                 while opcion!=3 {
+                    println!("|===== REGISTRO DE PRODUCTOS ======|");
+                    println!();
                     println!("|==================================|");
                     println!("| 1. Registrar productos.          |");
                     println!("| 2. Cambiar nombre algun producto |");
@@ -214,21 +247,29 @@ fn main() {
                 }
             },
             2=>{
+                println!("|===== VENTA DE PRODUCTOS ======|");
+                println!();
                 let nombre = entrada_nombres();
                 let cantidad = entrada_numeros(String::from("la cantidad a vender"));
                 cola.push_back(Comando::Vender(nombre, cantidad));
                 println!("Pedido de venta agregado a la cola."); pausa();
             },
             3=>{
+                println!("|===== DESCONTINUACIÓN DE PRODUCTOS ======|");
+                println!();
                 let nombre=entrada_nombres();
                 cola.push_back(Comando::Descontinuar(nombre));
                 println!("Orden de descontinuar agregada a la cola."); pausa();
             }
             4=>{
+                println!("|===== DESHACER CAMBIOS DE PRODUCTOS ======|");
+                println!();
                 cola.push_back(Comando::Deshacer);
                 println!("Orden de deshacer agregada a la cola."); pausa();
             }
             5=>{
+                println!("|===== PROCESAMIENTO DE PRODUCTOS ======|");
+                println!();
                 if cola.is_empty() {
                     println!("No hay pedidos en el sistema.");
                     pausa();
@@ -238,9 +279,6 @@ fn main() {
                         match cola.pop_front(){
                             Some(comando)=>{
                                  match comando{
-                                Comando::Vender(_,0)=>{
-                                    println!("Error: Venta ignorada, no se puede vender esa cantidad"); pausa();
-                                },
                                 Comando::Vender(nombre, stock)=>{
                                     match Inventario.vender(&nombre, stock){
                                         Ok(k)=>{
@@ -248,7 +286,7 @@ fn main() {
                                             historial.push((nombre,stock)); binario=1;
                                             pausa();
                                         },
-                                        Err(or)=>{println!("Error: El producto que ha querido vender no existe"); pausa();},
+                                        Err(or)=>{mostrar(&or); pausa();},
                                     }
                                 },
                                 Comando::Descontinuar(nombre)=>{
@@ -257,7 +295,7 @@ fn main() {
                                             println!("El producto {}, se ha descontinuado de la tienda", k.obtener_nombre_producto());
                                             historial.push((k.obtener_nombre_producto(),k.obtener_stock())); binario=2; pausa();
                                         },
-                                        Err(or)=>{println!("Error: El producto que ha querido descontinuar no existe"); pausa();},    
+                                        Err(or)=>{mostrar(&or); pausa();},    
                                     }
                                 }
                                 Comando::Deshacer=>{
@@ -303,16 +341,30 @@ fn main() {
                     }
                 },
             6=>{
+                println!("|===== PEDIDOS PENDIENTES ======|");
+                println!();
+                if cola.is_empty(){
+                    println!("Error: No se ha registrado ningún pedido aún.");
+                }
+                println!("===============");
+                for i in &cola{
+                    mostrar(i);
+                }
+                pausa();
+            },
+            7=>{
+                println!("|===== INVENTARIO ACTUAL ======|");
+                println!();
                 if Inventario.obtener_productos().is_empty(){
                     println!("Error: no se ha registrado ningún producto al iventario"); pausa();
                 }
                 let mut inventario_lista=Inventario.obtener_productos();
                 for p in inventario_lista{
-                    println!("| Nombre: {} - Stock: {}", p.obtener_nombre_producto(),p.obtener_stock());
+                    mostrar(p);
                 }
                 pausa();
             }
-            7=>{println!("Saliendo del programa..."); return;},
+            8=>{println!("Saliendo del programa..."); return;},
             _=> println!("Opción inválida, por favor, ingrese una opción correcta."),
             
         }
